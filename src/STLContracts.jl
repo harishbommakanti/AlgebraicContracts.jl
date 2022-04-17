@@ -1,4 +1,4 @@
-module LTLContracts
+module STLContracts
 
 #-- Modules
 # wiring diagrams
@@ -8,20 +8,23 @@ import Catlab.WiringDiagrams: oapply  # Needed to overwrite oapply function
 # intervals of real numbers
 using IntervalSets
 
-#-- Accessible functions
-export LTLContract, oapply, LTLContractDict
+# STL library
+using SignalTemporalLogic
 
-#-- Contracts are defined via intervals:
-struct LTLContract{T<:Real}
-    input::Vector{Interval}
-    output::Vector{Interval}
+#-- Accessible functions
+export STLContract, oapply, STLContractDict
+
+#-- Contracts are defined via STL formulas:
+struct STLContract{T<:Real}
+    input::Formula
+    output::Formula
 
     # Constructor
-    function LTLContract{T}(input::Vector, output::Vector) where T<:Real
-        # cannot have empty contract
+    function STLContract{T}(input::Formula, output::Formula) where T<:Real
+        # cannot have empty contract (a formula)
         for contract in [input; output]
-            if isempty(contract)
-                error("the interval $contract is empty or backwards")
+            if ismissing(contract.ϕ)
+                error("the interval $contract has no ϕ formula")
             end
         end
         new{T}(input, output)
@@ -29,37 +32,12 @@ struct LTLContract{T<:Real}
 end
 
 
-#-- Display struct as product of intervals:
-function formatInterval(contract::Interval) 
-    # Switch symbol for infinity
-    if -contract.left == contract.right == Inf
-        output = "ℝ"
-    else
-        # check left bound
-        if( contract.left == -Inf )
-            left = "-∞"
-            lbracket = "("
-        else
-            left = contract.left
-            lbracket = isleftopen(contract) ? "(" : "["
-        end
-
-        # check right bound
-        if( contract.right == Inf )
-            right = "∞"
-            rbracket = ")"
-        else
-            right = contract.right
-            rbracket = isrightopen(contract) ? ")" : "]"
-        end    
-
-        # Concatenate strings
-        output = "$lbracket" * "$left,$right" * "$rbracket"
-    end
-    return output
+#-- Display struct as product of :
+function formatSTLFormula(contract::Formula) 
+    return contract
 end
 
-function Base.show(io::IO, vf::LTLContract)
+function Base.show(io::IO, vf::STLContract)
     # Check all contracts
     list = [vf.input; vf.output]
     output = ""
@@ -69,18 +47,18 @@ function Base.show(io::IO, vf::LTLContract)
 
     for i in 1:len
         contract = list[i]
-        output *= formatInterval(contract)
+        output *= formatSTLFormula(contract)
         # add product operator [spaces make it easier to read]
         if i != len
             output *= " × "
         end
     end
     # display combined string
-    print("LTLContract( $output )")
+    print("STLContract( $output )")
 end
 
 #-- Compose contracts with diagram: 
-function oapply(d::WiringDiagram, ms::Vector{LTLContract{T}}) where T
+function oapply(d::WiringDiagram, ms::Vector{STLContract{T}}) where T
     # boxes in diagram
     box = boxes(d)
 
@@ -133,18 +111,23 @@ function oapply(d::WiringDiagram, ms::Vector{LTLContract{T}}) where T
         # 2. Induced contract, see section 3.3.1, P.13
         contract_source = ms[source_id].output[w.source.port] 
         contract_target = ms[target_id].input[w.target.port]
+        # TODO: intersect has to be changed to something else to say that
+        # the formulas 'agree'
         overlap = intersect(contract_source, contract_target)
         
-        format_source = formatInterval(contract_source)
-        format_target = formatInterval(contract_target)
 
-            # check if source contract is compatible with target contract
+        format_source = formatSTLFormula(contract_source)
+        format_target = formatSTLFormula(contract_target)
+
+        # check if source contract is compatible with target contract
+        # TODO: change this to something else that works for formulas
         if isempty(overlap) == true
             error("Incompatible contract between $source_name (id=$source_id) " * 
                   "and $target_name (id=$target_id) at wire \"$target_var\": " * 
                   "$format_source ∩ $format_target = ∅")
             
-            # Check for undefined behavior
+        # Check for undefined behavior
+        # TODO: change this to something that works for formulas
         elseif overlap != contract_source
             println("Intervals do not overlap between $source_name (id=$source_id) " * 
                     "and $target_name (id=$target_id) at wire \"$target_var\": " *
@@ -157,13 +140,13 @@ function oapply(d::WiringDiagram, ms::Vector{LTLContract{T}}) where T
     output = map( w -> ms[w.source.box].output[w.source.port], wires(d, :OutWire))
 
     # Create new machine
-    return LTLContract{T}(input, output)
+    return STLContract{T}(input, output)
 end
 
 # Compose using a library 
-const LTLContractDict{T} = Dict{ Symbol, LTLContract{T} }
+const STLContractDict{T} = Dict{ Symbol, STLContract{T} }
 
-function oapply(d::WiringDiagram, ms::LTLContractDict{T}) where T
+function oapply(d::WiringDiagram, ms::STLContractDict{T}) where T
     box = boxes(d)
     name_contract = keys(ms)
     
@@ -173,9 +156,10 @@ function oapply(d::WiringDiagram, ms::LTLContractDict{T}) where T
             name = b.value
             if !(name in name_contract)
                 # create default box
+                # TODO: change default box behavior
                 n_input = length(b.input_ports)
                 n_output = length(b.output_ports)
-                default_contract = LTLContract{T}(repeat([-Inf..Inf], n_input), 
+                default_contract = STLContract{T}(repeat([-Inf..Inf], n_input), 
                                                      repeat([-Inf..Inf], n_output) )
                 # add to dictionary
                 ms[name] = default_contract
